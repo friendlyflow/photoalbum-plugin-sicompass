@@ -12,6 +12,7 @@ use sicompass_sdk::ffon::FfonElement;
 use sicompass_sdk::markup::escape_attribute;
 use sicompass_sdk::plugin::{Descriptor, Plugin, PollResult, host};
 use sicompass_sdk::tags;
+use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
@@ -73,6 +74,41 @@ pub struct Listing {
     pub items: Vec<Item>,
 }
 
+/// Compare names the way a person reads them: `IMG_2` before `IMG_10`, and upper and lower
+/// case alike. A run of digits compares as a number, however long it is.
+pub fn natural_cmp(a: &str, b: &str) -> Ordering {
+    let (a_low, b_low) = (a.to_lowercase(), b.to_lowercase());
+    let (mut x, mut y) = (a_low.as_str(), b_low.as_str());
+    while let (Some(cx), Some(cy)) = (x.chars().next(), y.chars().next()) {
+        let order = if cx.is_ascii_digit() && cy.is_ascii_digit() {
+            let (nx, rest_x) = split_number(x);
+            let (ny, rest_y) = split_number(y);
+            x = rest_x;
+            y = rest_y;
+            nx.len().cmp(&ny.len()).then_with(|| nx.cmp(ny))
+        } else {
+            x = &x[cx.len_utf8()..];
+            y = &y[cy.len_utf8()..];
+            cx.cmp(&cy)
+        };
+        if order != Ordering::Equal {
+            return order;
+        }
+    }
+    // One ran out first, or they read the same, and then the order is still the same each
+    // time: `007` next to `7`, `A` next to `a`.
+    x.len().cmp(&y.len()).then_with(|| a.cmp(b))
+}
+
+/// The digits at the start of `text`, without leading zeros, and what follows them.
+fn split_number(text: &str) -> (&str, &str) {
+    let end = text
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(text.len());
+    let (digits, rest) = text.split_at(end);
+    (digits.trim_start_matches('0'), rest)
+}
+
 /// Read a folder. Hidden files and anything that is not a picture or a video are skipped.
 pub fn read_folder(dir: &Path, sort: Sort) -> std::io::Result<Listing> {
     let mut folders: Vec<(String, Option<SystemTime>)> = Vec::new();
@@ -100,11 +136,7 @@ pub fn read_folder(dir: &Path, sort: Sort) -> std::io::Result<Listing> {
             });
         }
     }
-    let by_name = |a: &str, b: &str| {
-        a.to_lowercase()
-            .cmp(&b.to_lowercase())
-            .then_with(|| a.cmp(b))
-    };
+    let by_name = natural_cmp;
     match sort {
         Sort::Name => {
             folders.sort_by(|a, b| by_name(&a.0, &b.0));
@@ -749,6 +781,41 @@ mod tests {
         album.set_root(t.0.clone());
         assert_eq!(album.current_path(), "/");
         assert!(the_grid(&loaded(&mut album)).contains("here.jpg"));
+    }
+
+    #[test]
+    fn names_sort_the_way_a_person_reads_them() {
+        let t = Temp::new("natural");
+        t.file("IMG_10.jpg")
+            .file("IMG_2.jpg")
+            .file("img_3.jpg")
+            .file("IMG_1.jpg");
+        t.folder("Trip 10").folder("Trip 9");
+        let listing = read_folder(&t.0, Sort::Name).unwrap();
+        let names: Vec<&str> = listing.items.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, ["IMG_1.jpg", "IMG_2.jpg", "img_3.jpg", "IMG_10.jpg"]);
+        assert_eq!(listing.folders, ["Trip 9", "Trip 10"]);
+    }
+
+    #[test]
+    fn natural_order_holds_at_the_edges() {
+        let before = |a, b| natural_cmp(a, b) == Ordering::Less;
+        assert!(before("a2", "a10"));
+        assert!(before("a", "a1"));
+        assert!(before("2", "a"), "digits before letters");
+        assert!(before("photo-119", "photo-120"));
+        assert!(before("photo-12", "photo-119"));
+        // Longer than any integer type.
+        assert!(before(
+            "99999999999999999999999",
+            "100000000000000000000000"
+        ));
+        // Same reading, and still one fixed order, so a sort cannot wobble.
+        assert_eq!(natural_cmp("007", "007"), Ordering::Equal);
+        assert_ne!(natural_cmp("007", "7"), Ordering::Equal);
+        assert_ne!(natural_cmp("A", "a"), Ordering::Equal);
+        assert_eq!(natural_cmp("007", "7"), natural_cmp("7", "007").reverse());
+        assert_eq!(natural_cmp("é1", "é2"), Ordering::Less);
     }
 
     /// The app rebuilds a list only for a tick that says `redraw`.
