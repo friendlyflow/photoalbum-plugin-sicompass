@@ -1,0 +1,111 @@
+name: Release
+
+# A plugin release is a vX.Y.Z tag (the /release skill pushes one). A plugin is
+# a program, so this builds it on every platform sicompass runs plugins on,
+# packs the builds, signs them with the plugin's key and attaches what the
+# sicompass Store downloads to the GitHub release:
+#   plugin-<target>.tar.gz (one per platform)  release.json  release.json.sig
+# The Store reads them from releases/latest/download/, so nothing in sicompass
+# changes when a plugin is released.
+#
+# Needs, in the repo settings:
+#   secret PLUGIN_SIGNING_KEY  the secret key from `sicompass-plugin keygen`
+#   variable PLUGIN_PUBLIC_KEY its public half, the one in the store list
+#
+# Run it by hand with dry_run (Actions -> Release -> Run workflow) to check a
+# release end to end with a throwaway key and without publishing anything.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build, pack, sign with a throwaway key and verify, but publish nothing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  # The SDK release whose `sicompass-plugin` packs plugin processes.
+  SDK_TAG: v0.9.11
+
+jobs:
+  build:
+    # Plain rustup on every runner, Windows included, where there is no Nix.
+    # Linux builds are static musl, so one runs on every distribution, NixOS
+    # included. macOS builds are signed ad hoc by the linker, which is what
+    # Apple Silicon needs to run them.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm }
+          - { target: aarch64-apple-darwin, os: macos-latest }
+          - { target: x86_64-apple-darwin, os: macos-latest }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: musl tools
+        if: contains(matrix.target, '-linux-musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools jq
+      - name: Build
+        shell: bash
+        run: ./scripts/release-plugin.sh build ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: build/${{ matrix.target }}/
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: cachix/install-nix-action@v31
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: build/
+
+      - name: Install the release tool
+        # The same tool the Store's checks come from.
+        run: |
+          nix develop -c cargo install --git https://github.com/friendlyflow/sicompass-plugin-sdk \
+            --tag "$SDK_TAG" sicompass-plugin --root "$RUNNER_TEMP/tool"
+          echo "SICOMPASS_PLUGIN=$RUNNER_TEMP/tool/bin/sicompass-plugin" >> "$GITHUB_ENV"
+
+      - name: Pack, sign, verify
+        env:
+          PLUGIN_SIGNING_KEY: ${{ secrets.PLUGIN_SIGNING_KEY }}
+          PLUGIN_PUBLIC_KEY: ${{ vars.PLUGIN_PUBLIC_KEY }}
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "true" ]; then
+            nix develop -c ./scripts/release-plugin.sh pack --dry-run
+          else
+            nix develop -c ./scripts/release-plugin.sh pack
+          fi
+
+      - name: Publish
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "See CHANGELOG.md."
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+
+      - name: Keep the dry run's files
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
