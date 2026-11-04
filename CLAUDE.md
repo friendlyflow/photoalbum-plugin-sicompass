@@ -19,7 +19,7 @@ The plugin platform is described in `../sicompass/docs/plugin-platform.md`.
   list. It never travels as a separate file.
 - A folder is read on a thread of its own, reported through `poll`, because the app waits
   for every call with no deadline.
-- Read-only. Keys, navigate mode, the big view and playing a video are all the app's.
+- Read-only. Keys, in element mode, the big view and playing a video are all the app's.
 
 **Before the first release:** set `minAppVersion` to the first app release that holds the
 grids and video (0.2.3 does not, it is only there so a debug build of the app loads this

@@ -1,7 +1,7 @@
 //! The photo album: a folder of pictures and videos as a grid.
 //!
 //! It only reads. Subfolders are rows you enter with Right, and each folder's pictures
-//! and videos are one row, a grid the app's navigate mode moves around. Keys, the big
+//! and videos are one row, a grid the app's in element mode moves around. Keys, the big
 //! view and playing a video are all the app's: this plugin only says what is there.
 //!
 //! [`Album`] is the logic, and [`PhotoAlbum`] puts the host in front of it. A folder is
