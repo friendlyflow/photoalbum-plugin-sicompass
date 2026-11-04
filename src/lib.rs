@@ -100,7 +100,11 @@ pub fn read_folder(dir: &Path, sort: Sort) -> std::io::Result<Listing> {
             });
         }
     }
-    let by_name = |a: &str, b: &str| a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| a.cmp(b));
+    let by_name = |a: &str, b: &str| {
+        a.to_lowercase()
+            .cmp(&b.to_lowercase())
+            .then_with(|| a.cmp(b))
+    };
     match sort {
         Sort::Name => {
             folders.sort_by(|a, b| by_name(&a.0, &b.0));
@@ -109,7 +113,11 @@ pub fn read_folder(dir: &Path, sort: Sort) -> std::io::Result<Listing> {
         // Oldest first, the order they were taken in.
         Sort::Date => {
             folders.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| by_name(&a.0, &b.0)));
-            items.sort_by(|a, b| a.modified.cmp(&b.modified).then_with(|| by_name(&a.name, &b.name)));
+            items.sort_by(|a, b| {
+                a.modified
+                    .cmp(&b.modified)
+                    .then_with(|| by_name(&a.name, &b.name))
+            });
         }
     }
     Ok(Listing {
@@ -133,7 +141,9 @@ pub fn grid_row(items: &[Item]) -> String {
                 let alt = escape_attribute(&item.name);
                 row.push_str(&format!(r#"<img src="{path}" alt="{alt}"><p>{text}</p>"#));
             }
-            Media::Video => row.push_str(&format!(r#"<video src="{path}">{text}</video><p>{text}</p>"#)),
+            Media::Video => row.push_str(&format!(
+                r#"<video src="{path}">{text}</video><p>{text}</p>"#
+            )),
         }
         row.push_str("</div>");
     }
@@ -164,7 +174,7 @@ impl Texts {
 pub fn rows(listing: &Listing, texts: &Texts) -> Vec<FfonElement> {
     let mut out = vec![FfonElement::Str(format!("<style>{ALBUM_CSS}</style>"))];
     for folder in &listing.folders {
-        out.push(FfonElement::new_obj(&tags::escape(folder)));
+        out.push(FfonElement::new_obj(tags::escape(folder)));
     }
     if !listing.items.is_empty() {
         out.push(FfonElement::Str(grid_row(&listing.items)));
@@ -177,7 +187,11 @@ pub fn rows(listing: &Listing, texts: &Texts) -> Vec<FfonElement> {
 /// The folder a setting names: as written when absolute, under the home folder otherwise.
 pub fn resolve_folder(setting: &str, home: Option<&Path>) -> PathBuf {
     let setting = setting.trim();
-    let setting = if setting.is_empty() { "Pictures" } else { setting };
+    let setting = if setting.is_empty() {
+        "Pictures"
+    } else {
+        setting
+    };
     let under_home = |rest: &str| match home {
         Some(home) => home.join(rest),
         None => PathBuf::from(rest),
@@ -246,7 +260,11 @@ impl Album {
     }
 
     pub fn set_current_path(&mut self, path: &str) {
-        self.current = if path.is_empty() { "/".to_owned() } else { path.to_owned() };
+        self.current = if path.is_empty() {
+            "/".to_owned()
+        } else {
+            path.to_owned()
+        };
         self.invalidate();
     }
 
@@ -426,7 +444,8 @@ mod tests {
 
     impl Temp {
         fn new(name: &str) -> Temp {
-            let dir = std::env::temp_dir().join(format!("photoalbum-{}-{name}", std::process::id()));
+            let dir =
+                std::env::temp_dir().join(format!("photoalbum-{}-{name}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();
             Temp(dir)
@@ -505,7 +524,11 @@ mod tests {
     #[test]
     fn a_folder_is_subfolders_then_one_row_of_its_pictures_and_videos() {
         let t = Temp::new("tree");
-        t.file("b.jpg").file("a.png").file("clip.mp4").file("notes.txt").file(".hidden.jpg");
+        t.file("b.jpg")
+            .file("a.png")
+            .file("clip.mp4")
+            .file("notes.txt")
+            .file(".hidden.jpg");
         t.folder("Summer").folder("autumn").folder(".cache");
         let rows = loaded(&mut album(&t.0));
         let got = strs(&rows);
@@ -515,9 +538,17 @@ mod tests {
         assert_eq!(got.len(), 4, "{got:?}");
 
         let counts = markup::target_counts(&got[3]);
-        assert_eq!((counts.images, counts.videos, counts.total()), (2, 1, 3), "{}", got[3]);
+        assert_eq!(
+            (counts.images, counts.videos, counts.total()),
+            (2, 1, 3),
+            "{}",
+            got[3]
+        );
         let targets = markup::targets(&got[3]);
-        let order: Vec<&str> = targets.iter().map(|t| t.value.rsplit('/').next().unwrap()).collect();
+        let order: Vec<&str> = targets
+            .iter()
+            .map(|t| t.value.rsplit('/').next().unwrap())
+            .collect();
         assert_eq!(order, ["a.png", "b.jpg", "clip.mp4"]);
     }
 
@@ -526,7 +557,11 @@ mod tests {
         let t = Temp::new("shape");
         t.file("a.jpg");
         let got = strs(&loaded(&mut album(&t.0)));
-        assert!(got[1].starts_with(r#"<div class="grid-container"><div class="grid-item"><img "#), "{}", got[1]);
+        assert!(
+            got[1].starts_with(r#"<div class="grid-container"><div class="grid-item"><img "#),
+            "{}",
+            got[1]
+        );
         assert!(ALBUM_CSS.contains(".grid-container") && ALBUM_CSS.contains("repeat(3, 1fr)"));
         assert!(ALBUM_CSS.contains("max-width: none"));
     }
@@ -535,7 +570,9 @@ mod tests {
     #[test]
     fn a_file_name_with_tags_in_it_stays_a_file_name() {
         let t = Temp::new("names");
-        t.file("<b>x.jpg").file(r#"say "hi" & go.png"#).file("<video src=y>.mp4");
+        t.file("<b>x.jpg")
+            .file(r#"say "hi" & go.png"#)
+            .file("<video src=y>.mp4");
         let rows = loaded(&mut album(&t.0));
         let row = the_grid(&rows);
         let targets = markup::targets(&row);
@@ -544,12 +581,23 @@ mod tests {
             .iter()
             .map(|t| t.value.rsplit('/').next().unwrap().to_owned())
             .collect();
-        assert_eq!(names, ["<b>x.jpg", "<video src=y>.mp4", r#"say "hi" & go.png"#]);
+        assert_eq!(
+            names,
+            ["<b>x.jpg", "<video src=y>.mp4", r#"say "hi" & go.png"#]
+        );
         for target in &targets {
-            assert!(Path::new(&target.value).is_file(), "{} is not the real path", target.value);
+            assert!(
+                Path::new(&target.value).is_file(),
+                "{} is not the real path",
+                target.value
+            );
         }
         // Nothing in the row reads as bold or as a fourth target.
-        assert!(markup::plain(&row).contains("<b>x.jpg"), "{}", markup::plain(&row));
+        assert!(
+            markup::plain(&row).contains("<b>x.jpg"),
+            "{}",
+            markup::plain(&row)
+        );
     }
 
     #[test]
@@ -618,7 +666,10 @@ mod tests {
         album.push_path("sub");
         // However the two reads finish, this folder's rows are this folder's.
         let row = the_grid(&loaded(&mut album));
-        assert!(row.contains("inner.jpg") && !row.contains("top.jpg"), "{row}");
+        assert!(
+            row.contains("inner.jpg") && !row.contains("top.jpg"),
+            "{row}"
+        );
     }
 
     #[test]
@@ -646,10 +697,19 @@ mod tests {
     fn sorting_by_date_is_oldest_first() {
         let t = Temp::new("dates");
         t.file("z-old.jpg").file("a-new.jpg");
-        let old = std::fs::File::options().write(true).open(t.0.join("z-old.jpg")).unwrap();
-        old.set_modified(SystemTime::now() - Duration::from_secs(86_400)).unwrap();
+        let old = std::fs::File::options()
+            .write(true)
+            .open(t.0.join("z-old.jpg"))
+            .unwrap();
+        old.set_modified(SystemTime::now() - Duration::from_secs(86_400))
+            .unwrap();
         let names = |sort| -> Vec<String> {
-            read_folder(&t.0, sort).unwrap().items.into_iter().map(|i| i.name).collect()
+            read_folder(&t.0, sort)
+                .unwrap()
+                .items
+                .into_iter()
+                .map(|i| i.name)
+                .collect()
         };
         assert_eq!(names(Sort::Date), ["z-old.jpg", "a-new.jpg"]);
         assert_eq!(names(Sort::Name), ["a-new.jpg", "z-old.jpg"]);
@@ -660,11 +720,20 @@ mod tests {
     #[test]
     fn the_setting_means_a_folder_under_home_unless_it_says_otherwise() {
         let home = Path::new("/home/someone");
-        assert_eq!(resolve_folder("Pictures", Some(home)), home.join("Pictures"));
-        assert_eq!(resolve_folder("~/Photos/2026", Some(home)), home.join("Photos/2026"));
+        assert_eq!(
+            resolve_folder("Pictures", Some(home)),
+            home.join("Pictures")
+        );
+        assert_eq!(
+            resolve_folder("~/Photos/2026", Some(home)),
+            home.join("Photos/2026")
+        );
         assert_eq!(resolve_folder("  ", Some(home)), home.join("Pictures"));
         #[cfg(unix)]
-        assert_eq!(resolve_folder("/mnt/photos", Some(home)), PathBuf::from("/mnt/photos"));
+        assert_eq!(
+            resolve_folder("/mnt/photos", Some(home)),
+            PathBuf::from("/mnt/photos")
+        );
     }
 
     #[test]
@@ -697,11 +766,17 @@ mod tests {
             "photoalbum-radio-sort-order",
         ] {
             for (language, text) in languages {
-                assert!(text.contains(&format!("\n{id} = ")), "{language} has no {id}");
+                assert!(
+                    text.contains(&format!("\n{id} = ")),
+                    "{language} has no {id}"
+                );
             }
         }
         for (language, text) in languages {
-            assert!(text.contains("%s"), "{language} must keep the folder placeholder");
+            assert!(
+                text.contains("%s"),
+                "{language} must keep the folder placeholder"
+            );
         }
     }
 
