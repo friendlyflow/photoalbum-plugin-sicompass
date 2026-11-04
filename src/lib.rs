@@ -393,10 +393,14 @@ impl Plugin for PhotoAlbum {
     fn poll(&mut self) -> PollResult {
         let path = self.album.current_path();
         let at_root = path.is_empty() || path == "/";
-        let news = self.album.take_news();
+        let news = self.album.take_news() || std::mem::take(&mut self.changed);
         PollResult {
             at_root,
-            needs_refresh: news || std::mem::take(&mut self.changed),
+            // `redraw` is what makes the app look at this tick at all, and
+            // `needs_refresh` is what it does then. Without the first a folder you
+            // just went into stays on the loading line.
+            redraw: news,
+            needs_refresh: news,
             structural_edit_here: false,
             dashboard_here: false,
             ..Default::default()
@@ -745,6 +749,36 @@ mod tests {
         album.set_root(t.0.clone());
         assert_eq!(album.current_path(), "/");
         assert!(the_grid(&loaded(&mut album)).contains("here.jpg"));
+    }
+
+    /// The app rebuilds a list only for a tick that says `redraw`.
+    #[test]
+    fn a_finished_read_tells_the_app_to_redraw_and_refresh() {
+        let t = Temp::new("poll");
+        t.file("a.jpg");
+        let mut plugin = PhotoAlbum {
+            album: Album::new(t.0.clone(), Sort::Name, texts()),
+            changed: false,
+        };
+        assert_eq!(strs(&plugin.fetch()), ["loading"]);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let news = loop {
+            let polled = plugin.poll();
+            if polled.redraw || polled.needs_refresh {
+                break polled;
+            }
+            assert!(Instant::now() < deadline, "the read never finished");
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        assert!(news.redraw && news.needs_refresh);
+        assert!(!news.structural_edit_here && !news.dashboard_here);
+        let quiet = plugin.poll();
+        assert!(!quiet.redraw && !quiet.needs_refresh, "it says so once");
+        assert!(the_grid(&plugin.fetch()).contains("a.jpg"));
+
+        plugin.on_setting_change("sortOrder", "chronologically");
+        let changed = plugin.poll();
+        assert!(changed.redraw && changed.needs_refresh);
     }
 
     /// Every id the code or the manifest names exists, in every language.
